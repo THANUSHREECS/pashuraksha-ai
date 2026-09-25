@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PashuRaksha AI - AI-Assisted Livestock Health Early-Warning & Surveillance Platform</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 antialiased p-4 sm:p-6 min-h-screen">
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Header Section -->
+    <header class="bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div class="flex items-center gap-4">
+        <div class="w-14 h-14 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-3xl font-bold shadow-md">
+          🐄
+        </div>
+        <div>
+          <h1 class="text-2xl sm:text-3xl font-bold text-white">PashuRaksha AI</h1>
+          <p class="text-sm text-slate-400">AI-Assisted Livestock Health Early-Warning & Surveillance Platform</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <span id="backend-status-badge" class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          Backend API: Connecting...
+        </span>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="flex flex-wrap gap-2 border-b border-slate-800 pb-2">
+      <button onclick="switchTab('checker')" id="tab-checker" class="active-tab px-4 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 bg-emerald-600 text-white">
+        📝 Farmer Report
+      </button>
+      <button onclick="switchTab('vet')" id="tab-vet" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-800 transition-all flex items-center gap-2">
+        👨‍⚕️ Veterinary Verification
+      </button>
+      <button onclick="switchTab('lab')" id="tab-lab" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-800 transition-all flex items-center gap-2">
+        🔬 Laboratory
+      </button>
+      <button onclick="switchTab('gis')" id="tab-gis" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-800 transition-all flex items-center gap-2">
+        🗺️ GIS Surveillance & Alerts
+      </button>
+      <button onclick="switchTab('diseases')" id="tab-diseases" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-800 transition-all flex items-center gap-2">
+        📚 Disease Knowledge & Prevention
+      </button>
+      <button onclick="switchTab('evm')" id="tab-evm" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-800 transition-all flex items-center gap-2">
+        🛡️ Prevention & Veterinary Care
+      </button>
+      <button onclick="switchTab('offline')" id="tab-offline" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-400 hover:bg-slate-800 transition-all flex items-center gap-2">
+        📶 Offline Queue
+      </button>
+      <!-- Multilingual Switch -->
+      <div class="ml-auto flex items-center gap-2">
+        <select id="lang-select" onchange="changeLanguage(this.value)" class="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1 outline-none">
+          <option value="en">English</option>
+          <option value="kn">Kannada</option>
+          <option value="hi">Hindi</option>
+        </select>
+      </div>
+    </nav>
+
+    <!-- TAB 1: DIAGNOSTIC AGENT -->
+    <div id="section-checker" class="space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Input Form -->
+        <div class="lg:col-span-5 bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-5 shadow-sm">
+          
+          <div>
+            <h2 id="lbl-form-title" class="text-lg font-bold text-white flex items-center gap-2">
+              📝 Livestock Health Report Form
+            </h2>
+            <p id="lbl-form-desc" class="text-xs text-slate-400 mt-1">Submit animal profile and observed health signals for PashuRaksha AI risk evaluation.</p>
+          </div>
+
+          <!-- Section: Automatic Location & Environment -->
+          <div class="bg-slate-900 border border-slate-700/80 rounded-xl p-4 space-y-3">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h3 class="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                📍 Automatic location & environment
+              </h3>
+              <span id="location-status-badge" class="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                Detecting...
+              </span>
+            </div>
+
+            <!-- Readouts & Coordinates -->
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <div class="bg-slate-800/80 p-2 rounded-lg border border-slate-700">
+                <span class="text-slate-400 block">Latitude</span>
+                <span id="location-lat" class="font-mono text-emerald-400 font-medium">Detecting...</span>
+              </div>
+              <div class="bg-slate-800/80 p-2 rounded-lg border border-slate-700">
+                <span class="text-slate-400 block">Longitude</span>
+                <span id="location-lon" class="font-mono text-emerald-400 font-medium">Detecting...</span>
+              </div>
+            </div>
+
+            <!-- District & Village Fields -->
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between items-center">
+                <span class="text-slate-300 font-medium">District & Village:</span>
+                <span id="geocoding-status-badge" class="text-slate-400"></span>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[11px] text-slate-400 block mb-0.5">District</label>
+                  <input id="location-district" type="text" placeholder="Detecting district..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                </div>
+                <div>
+                  <label class="text-[11px] text-slate-400 block mb-0.5">Village / Locality</label>
+                  <input id="location-village" type="text" placeholder="Detecting village..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                </div>
+              </div>
+            </div>
+
+            <!-- Environmental Conditions Card -->
+            <div class="bg-slate-800/90 border border-slate-700 rounded-lg p-3 space-y-2 text-xs">
+              <div class="flex justify-between items-center text-slate-300 font-semibold border-b border-slate-700/60 pb-1">
+                <span>🌦 Environmental conditions</span>
+                <span id="env-condition" class="text-emerald-400">Loading...</span>
+              </div>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300">
+                <div>Environmental temperature: <span id="env-temp" class="font-mono text-white font-semibold">Loading...</span></div>
+                <div>Relative humidity: <span id="env-humidity" class="font-mono text-white font-semibold">Loading...</span></div>
+                <div>Rainfall: <span id="env-rainfall" class="font-mono text-white font-semibold">Loading...</span></div>
+                <div>Wind speed: <span id="env-wind" class="font-mono text-white font-semibold">Loading...</span></div>
+              </div>
+              <div class="text-[10px] text-slate-400 pt-1 flex justify-between items-center">
+                <span id="env-source">Source: Connecting...</span>
+              </div>
+            </div>
+
+            <!-- Refresh Location Button -->
+            <button type="button" onclick="requestAutomaticLocation()" class="w-full py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium rounded-lg text-xs transition flex items-center justify-center gap-1.5">
+              🔄 Refresh location & weather
+            </button>
+          </div>
+
+          <!-- Animal Information Section -->
+          <div class="space-y-4">
+            <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">🐄 Animal Information</h3>
+            
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium mb-1.5 text-slate-300">Cattle Type</label>
+                <select id="cattle-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                  <option value="cow">Cow / Desi Breed</option>
+                  <option value="buffalo">Buffalo</option>
+                  <option value="calf">Calf (&lt; 1 yr)</option>
+                  <option value="bull">Bull / Ox</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium mb-1.5 text-slate-300">Fever Status</label>
+                <select id="fever-status" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                  <option value="normal">Normal Temp</option>
+                  <option value="high">High Fever (>104°F)</option>
+                  <option value="moderate">Moderate Fever (102-104°F)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Animal Body Temperature Field (Renamed & Helper Text Added) -->
+            <div class="bg-slate-900 border border-slate-700/80 rounded-xl p-3 space-y-1">
+              <label class="block text-xs font-semibold text-amber-300">
+                Animal body temperature (°C)
+              </label>
+              <p class="text-[11px] text-slate-400">
+                Optional — enter only if measured with a thermometer.
+              </p>
+              <input id="animal-body-temp" type="number" step="0.1" min="30" max="45" placeholder="e.g. 39.5" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500">
+            </div>
+          </div>
+
+          <!-- Observed Symptoms -->
+          <div>
+            <label class="block text-xs font-medium mb-2 text-slate-300">Observed Symptoms (Check all that apply):</label>
+            <div class="grid grid-cols-2 gap-2 text-xs" id="symptom-checkboxes">
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="skin_nodules" class="accent-emerald-500 rounded">
+                <span>Skin Nodules / Lumps</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="mouth_blisters" class="accent-emerald-500 rounded">
+                <span>Mouth / Tongue Blisters</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="hoof_lesions" class="accent-emerald-500 rounded">
+                <span>Hoof Lesions / Lameness</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="drooling" class="accent-emerald-500 rounded">
+                <span>Ropey Saliva / Drooling</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="throat_swelling" class="accent-emerald-500 rounded">
+                <span>Throat / Neck Swelling</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="milk_drop" class="accent-emerald-500 rounded">
+                <span>Sudden Milk Production Drop</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="udder_swelling" class="accent-emerald-500 rounded">
+                <span>Udder Hardness / Swelling</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="respiratory_distress" class="accent-emerald-500 rounded">
+                <span>Severe Cough / Gasping</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="leg_swelling" class="accent-emerald-500 rounded">
+                <span>Leg Swelling / Muscle Pain</span>
+              </label>
+              <label class="flex items-center gap-2 p-2 rounded-lg border border-slate-700 hover:bg-slate-700/50 cursor-pointer">
+                <input type="checkbox" value="sudden_collapse" class="accent-emerald-500 rounded">
+                <span>Sudden Weakness / Tremors</span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium mb-1.5 text-slate-400">Quick Test Scenarios:</label>
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" onclick="presetCase('lsd')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-md text-xs font-medium">Lumpy Skin Case</button>
+              <button type="button" onclick="presetCase('fmd')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-md text-xs font-medium">FMD Outbreak Case</button>
+              <button type="button" onclick="presetCase('hs')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-md text-xs font-medium">Throat Swelling (HS)</button>
+              <button type="button" onclick="presetCase('mastitis')" class="px-2.5 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-md text-xs font-medium">Mastitis Case</button>
+            </div>
+          </div>
+
+          <button type="button" onclick="submitDiagnosis()" id="btn-submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition shadow-md flex items-center justify-center gap-2">
+            <span>🤖 Calculate Risk Indication</span>
+          </button>
+        </div>
+
+        <!-- Diagnostic Output -->
+        <div class="lg:col-span-7 bg-slate-800 border border-slate-700 rounded-2xl p-6 flex flex-col justify-between shadow-sm">
+          <div class="space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-700 pb-3">
+              <h3 id="lbl-result-title" class="font-bold text-lg text-white flex items-center gap-2">
+                ⚠️ Livestock Health Risk Assessment
+              </h3>
+              <span id="output-risk-badge" class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Ready for Input
+              </span>
+            </div>
+
+            <div id="output-body" class="space-y-4 text-sm text-slate-300">
+              <div class="p-8 text-center border-2 border-dashed border-slate-700 rounded-xl space-y-2">
+                <span class="text-4xl">🐄</span>
+                <h4 class="font-semibold text-white">No Symptoms Selected Yet</h4>
+                <p class="text-xs text-slate-400">Select symptoms from the left panel or click a quick test scenario to submit request to PashuRaksha AI backend API.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-4 border-t border-slate-700 text-xs text-slate-400 flex items-center justify-between">
+            <span>ℹ️ Always consult a licensed Veterinary Doctor for clinical treatment.</span>
+            <span class="font-mono text-emerald-400">API Endpoint: /api/diagnose</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: DISEASE MATRIX -->
+    <div id="section-diseases" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-white">Disease Knowledge & Prevention Matrix</h2>
+            <p class="text-xs text-slate-400">Fetched dynamically from PashuRaksha REST API (/api/diseases).</p>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" onclick="fetchDiseases('all')" class="disease-filter-btn px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold">All</button>
+            <button type="button" onclick="fetchDiseases('new')" class="disease-filter-btn px-3 py-1.5 bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold">New / Emerging</button>
+            <button type="button" onclick="fetchDiseases('viral')" class="disease-filter-btn px-3 py-1.5 bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold">Viral</button>
+            <button type="button" onclick="fetchDiseases('bacterial')" class="disease-filter-btn px-3 py-1.5 bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold">Bacterial</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="disease-cards-container">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: EVM REMEDIES -->
+    <div id="section-evm" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">🛡️ Prevention & Veterinary Care</h2>
+          <p class="text-xs text-slate-400">Ethnoveterinary Reference Information. Educational/reference information only. Not a substitute for veterinary diagnosis or treatment.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="evm-cards-container">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: VACCINATION -->
+    <div id="section-vaccine" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div>
+          <h2 class="text-xl font-bold text-white">Annual Cattle Vaccination & Bio-Security Schedule</h2>
+          <p class="text-xs text-slate-400">Fetched from PashuRaksha REST API (/api/vaccination-schedule).</p>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs text-left border-collapse">
+            <thead>
+              <tr class="border-b border-slate-700 bg-slate-900/50 text-slate-300">
+                <th class="p-3">Disease</th>
+                <th class="p-3">Primary Dose</th>
+                <th class="p-3">Booster Frequency</th>
+                <th class="p-3">Recommended Timing</th>
+                <th class="p-3">National Program</th>
+              </tr>
+            </thead>
+            <tbody id="vaccine-table-body" class="divide-y divide-slate-700/60 text-slate-200">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: VET VERIFICATION -->
+    <div id="section-vet" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div class="flex justify-between">
+          <div>
+            <h2 class="text-xl font-bold text-white">🚨 Veterinary Verification Dashboard</h2>
+            <p class="text-xs text-slate-400">Review and verify farmer health reports.</p>
+          </div>
+          <button onclick="fetchVetReports()" class="bg-emerald-600 px-3 py-1.5 rounded-lg text-white text-xs font-semibold">🔄 Refresh Cases</button>
+        </div>
+        <div id="vet-reports-container" class="space-y-4">
+          <p class="text-xs text-slate-400">Click Refresh to load pending veterinary cases.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: LABORATORY -->
+    <div id="section-lab" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div class="flex justify-between">
+          <div>
+            <h2 class="text-xl font-bold text-white">🔬 Laboratory & Sample Management</h2>
+            <p class="text-xs text-slate-400">Process samples referred by veterinarians.</p>
+          </div>
+          <button onclick="fetchLabReports()" class="bg-emerald-600 px-3 py-1.5 rounded-lg text-white text-xs font-semibold">🔄 Refresh Samples</button>
+        </div>
+        <div id="lab-reports-container" class="space-y-4">
+          <p class="text-xs text-slate-400">Click Refresh to load samples pending lab verification.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: GIS SURVEILLANCE -->
+    <div id="section-gis" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div class="flex justify-between">
+          <div>
+            <h2 class="text-xl font-bold text-white">🗺️ GIS Risk Surveillance & Early Warning</h2>
+            <p class="text-xs text-slate-400">Risk visualization based on submitted health reports.</p>
+          </div>
+          <button onclick="fetchGISReports()" class="bg-emerald-600 px-3 py-1.5 rounded-lg text-white text-xs font-semibold">🔄 Refresh Map Data</button>
+        </div>
+        
+        <div id="gis-alerts-container" class="space-y-2 mb-4"></div>
+
+        <div class="flex flex-col space-y-2">
+          <div class="flex justify-between items-center bg-slate-900 border border-slate-700 px-4 py-2 rounded-lg">
+             <div class="text-xs text-slate-300">
+                <span class="font-bold text-white mr-2">GIS Risk Legend:</span> 
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-blue-500 ml-2 shadow"></span> Low
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-yellow-400 ml-2 shadow"></span> Moderate
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-orange-500 ml-2 shadow"></span> High
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-600 ml-2 shadow"></span> Critical
+             </div>
+          </div>
+          <div class="bg-slate-900 border border-slate-700 rounded-xl p-0 h-[500px] w-full relative z-0 overflow-hidden">
+            <div id="map" class="w-full h-full z-10"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: OFFLINE QUEUE -->
+    <div id="section-offline" class="hidden space-y-6">
+      <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4 shadow-sm">
+        <div class="flex justify-between">
+          <div>
+            <h2 class="text-xl font-bold text-white">📶 Offline Report Queue</h2>
+            <p class="text-xs text-slate-400">Reports saved locally when connectivity is unavailable.</p>
+          </div>
+          <button onclick="renderOfflineQueue()" class="bg-emerald-600 px-3 py-1.5 rounded-lg text-white text-xs font-semibold">🔄 Refresh</button>
+        </div>
+        <div id="offline-queue-container" class="space-y-4">
+          <p class="text-xs text-slate-400">No offline reports.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script type="module" src="app.ts"></script>
+</body>
+</html>
