@@ -1,0 +1,11 @@
+[
+  "backend/tests/test_location_weather.py::test_animal_body_temp_remains_separate_from_environmental_temp",
+  "backend/tests/test_location_weather.py::test_district_village_populated_on_reverse_geocoding_success",
+  "backend/tests/test_location_weather.py::test_farmer_vet_lab_workflow_passes",
+  "backend/tests/test_location_weather.py::test_gps_coordinates_accepted_in_report",
+  "backend/tests/test_location_weather.py::test_offline_report_payload_validation",
+  "backend/tests/test_location_weather.py::test_ownership_and_security_tests_pass",
+  "backend/tests/test_location_weather.py::test_reverse_geocoding_failure_does_not_fabricate_values",
+  "backend/tests/test_location_weather.py::test_weather_failure_does_not_fabricate_values",
+  "backend/tests/test_location_weather.py::test_weather_values_passed_through_when_available"
+]

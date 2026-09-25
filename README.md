@@ -1,13 +1,8 @@
-# PashuRaksha AI - Frontend Web App
+# pytest cache directory #
 
-Responsive web interface for PashuRaksha AI cattle disease protection and diagnostic service.
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
 
-## Running Frontend
+**Do not** commit this to version control.
 
-Simply open `index.html` in any web browser, or serve it using a local HTTP server:
-
-```bash
-# Using Python built-in HTTP server
-python -m http.server 3000
-```
-Then open `http://localhost:3000` in your browser.
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
