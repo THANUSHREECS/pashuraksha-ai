@@ -38,8 +38,21 @@ export interface DiagnosisPayload {
   weather_source?: string | null;
 }
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+// API Configuration
+function detectApiBaseUrl(): string {
+  const host = window.location.hostname || '127.0.0.1';
+  return `http://${host}:8000`;
+}
+
+let API_BASE_URL = detectApiBaseUrl();
 let isBackendAvailable = false;
+
+// Universal fetch helper with timeout
+function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 3000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 // Application State
 export const state: {
@@ -143,22 +156,35 @@ const fallbackVaccines = [
 // Check API Health on load
 export async function checkBackendHealth(): Promise<boolean> {
   const badge = document.getElementById('backend-status-badge');
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) {
-      isBackendAvailable = true;
-      if (badge) {
-        badge.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30";
-        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span> Backend API: Connected (${API_BASE_URL})`;
+  const urlsToCheck = Array.from(new Set([
+    API_BASE_URL,
+    'http://127.0.0.1:8000',
+    'http://localhost:8000'
+  ]));
+
+  for (const url of urlsToCheck) {
+    try {
+      const res = await fetchWithTimeout(`${url}/api/health`, {}, 2500);
+      if (res.ok) {
+        API_BASE_URL = url;
+        isBackendAvailable = true;
+        if (badge) {
+          badge.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30";
+          badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span> Backend API: Connected (${url})`;
+        }
+        return true;
       }
-      return true;
+    } catch (err) {
+      // Try next candidate
     }
-  } catch (err) {
-    isBackendAvailable = false;
-    if (badge) {
-      badge.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30";
-      badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span> Standalone / Offline Mode`;
-    }
+  }
+
+  isBackendAvailable = false;
+  if (badge) {
+    badge.className = "inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30 cursor-pointer";
+    badge.title = "Click to reconnect to backend API";
+    badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span> Standalone / Offline Mode (Click to Retry)`;
+    badge.onclick = () => { checkBackendHealth(); };
   }
   return false;
 }
@@ -168,7 +194,7 @@ export function requestAutomaticLocation(): void {
   updateLocationUI('detecting', 'Detecting location...');
 
   if (!navigator.geolocation) {
-    updateLocationUI('unavailable', 'Geolocation not supported by browser');
+    fallbackIpLocation('Geolocation not supported by browser');
     return;
   }
 
@@ -181,7 +207,7 @@ export function requestAutomaticLocation(): void {
       state.location.latitude = lat;
       state.location.longitude = lon;
 
-      updateLocationUI('detected', 'Location detected', lat, lon);
+      updateLocationUI('detected', 'Location detected (GPS)', lat, lon);
 
       // Perform Reverse Geocoding & Weather Fetching concurrently
       await Promise.all([
@@ -189,29 +215,94 @@ export function requestAutomaticLocation(): void {
         fetchEnvironmentalWeather(lat, lon)
       ]);
     },
-    (error) => {
-      let status: LocationState['status'] = 'unavailable';
-      let msg = 'Location unavailable';
-
+    async (error) => {
+      let reason = 'GPS unavailable';
       if (error.code === error.PERMISSION_DENIED) {
-        status = 'permission_denied';
-        msg = 'Permission denied';
+        reason = 'GPS permission denied';
       } else if (error.code === error.TIMEOUT) {
-        status = 'timeout';
-        msg = 'Location request timed out';
+        reason = 'GPS timed out';
       }
-
-      state.location.status = status;
-      state.location.latitude = null;
-      state.location.longitude = null;
-      state.location.district = null;
-      state.location.village = null;
-
-      updateLocationUI(status, msg);
-      updateWeatherUI('unavailable');
+      console.warn(`Browser GPS failed (${reason}), attempting Network IP Geolocation fallback...`);
+      await fallbackIpLocation(reason);
     },
-    { timeout: 10000, enableHighAccuracy: true }
+    { timeout: 6000, enableHighAccuracy: false }
   );
+}
+
+async function fallbackIpLocation(priorReason: string): Promise<void> {
+  updateLocationUI('detecting', 'Detecting via Network IP...');
+
+  // 1. Try Backend IP Geocode endpoint
+  if (isBackendAvailable) {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE_URL}/api/geocode/ip`, {}, 3000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'success' && data.latitude && data.longitude) {
+          applyLocationSuccess(data.latitude, data.longitude, data.district, data.village, 'Network IP');
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend IP geocoding failed:', e);
+    }
+  }
+
+  // 2. Try Direct Client IP Geocode
+  for (const ipUrl of ['https://ipapi.co/json/', 'https://ipwho.is/']) {
+    try {
+      const res = await fetchWithTimeout(ipUrl, {}, 3000);
+      if (res.ok) {
+        const data = await res.json();
+        const lat = data.latitude ? parseFloat(data.latitude) : null;
+        const lon = data.longitude ? parseFloat(data.longitude) : null;
+        const district = data.city || data.region || null;
+        const village = data.city || null;
+        if (lat && lon) {
+          applyLocationSuccess(lat, lon, district, village, 'Network IP');
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn(`Direct IP service ${ipUrl} failed:`, e);
+    }
+  }
+
+  // 3. If all fail, mark as unavailable
+  state.location.status = 'unavailable';
+  state.location.latitude = null;
+  state.location.longitude = null;
+  state.location.district = null;
+  state.location.village = null;
+
+  updateLocationUI('unavailable', `${priorReason} (enter manually)`);
+  updateWeatherUI('unavailable');
+}
+
+async function applyLocationSuccess(lat: number, lon: number, district: string | null, village: string | null, source: string): Promise<void> {
+  state.location.status = 'detected';
+  state.location.latitude = lat;
+  state.location.longitude = lon;
+  state.location.district = district;
+  state.location.village = village;
+
+  updateLocationUI('detected', `Location detected (${source})`, lat, lon);
+
+  const districtEl = document.getElementById('location-district') as HTMLInputElement | null;
+  const villageEl = document.getElementById('location-village') as HTMLInputElement | null;
+  const geoStatusEl = document.getElementById('geocoding-status-badge');
+
+  if (districtEl && district) districtEl.value = district;
+  if (villageEl && village) villageEl.value = village;
+  if (geoStatusEl && district) {
+    geoStatusEl.className = 'text-xs text-emerald-400 font-semibold';
+    geoStatusEl.textContent = `✓ Automatically detected (${source})`;
+  }
+
+  await Promise.all([
+    fetchReverseGeocode(lat, lon),
+    fetchEnvironmentalWeather(lat, lon)
+  ]);
 }
 
 async function fetchReverseGeocode(lat: number, lon: number): Promise<void> {
@@ -402,90 +493,153 @@ function updateWeatherUI(status: 'loading' | 'available' | 'unavailable'): void 
 
 // 3. Submit Health Report with Location + Environmental + Animal Temp
 export async function submitDiagnosis(): Promise<void> {
-  const selectedSymptoms = Array.from(document.querySelectorAll('#symptom-checkboxes input:checked')).map(cb => (cb as HTMLInputElement).value);
-  const fever = (document.getElementById('fever-status') as HTMLSelectElement).value;
-  const cattleType = (document.getElementById('cattle-type') as HTMLSelectElement).value;
-  
-  // Animal body temperature (STRICTLY SEPARATE)
-  const bodyTempInput = (document.getElementById('animal-body-temp') as HTMLInputElement | null)?.value;
-  const animalBodyTemp = bodyTempInput && !isNaN(parseFloat(bodyTempInput)) ? parseFloat(bodyTempInput) : null;
+  const btnSubmit = document.getElementById('btn-submit') as HTMLButtonElement | null;
+  const originalBtnHTML = btnSubmit ? btnSubmit.innerHTML : '<span>🤖 Calculate Risk Indication</span>';
 
-  if (animalBodyTemp !== null && (animalBodyTemp < 30 || animalBodyTemp > 45)) {
-    alert("Invalid Animal Body Temperature. Please enter the measured animal body temperature in °C (between 30 and 45).");
-    return;
-  }
+  try {
+    const selectedSymptoms = Array.from(document.querySelectorAll('#symptom-checkboxes input:checked')).map(cb => (cb as HTMLInputElement).value);
+    const fever = (document.getElementById('fever-status') as HTMLSelectElement)?.value || 'normal';
+    const cattleType = (document.getElementById('cattle-type') as HTMLSelectElement)?.value || 'cow';
+    
+    // Animal body temperature (STRICTLY SEPARATE)
+    const bodyTempInput = (document.getElementById('animal-body-temp') as HTMLInputElement | null)?.value?.trim();
+    const animalBodyTemp = bodyTempInput && !isNaN(parseFloat(bodyTempInput)) ? parseFloat(bodyTempInput) : null;
 
-  // District / Village overrides
-  const districtInput = (document.getElementById('location-district') as HTMLInputElement | null)?.value || state.location.district;
-  const villageInput = (document.getElementById('location-village') as HTMLInputElement | null)?.value || state.location.village;
+    if (animalBodyTemp !== null && (animalBodyTemp < 30 || animalBodyTemp > 45)) {
+      alert("Invalid Animal Body Temperature. Please enter the measured animal body temperature in °C (between 30 and 45).");
+      return;
+    }
 
-  const outputBody = document.getElementById('output-body');
-  const riskBadge = document.getElementById('output-risk-badge');
+    // District / Village overrides
+    const districtInput = (document.getElementById('location-district') as HTMLInputElement | null)?.value?.trim() || state.location.district;
+    const villageInput = (document.getElementById('location-village') as HTMLInputElement | null)?.value?.trim() || state.location.village;
 
-  if (selectedSymptoms.length === 0 && fever === 'normal' && animalBodyTemp === null) {
+    const outputBody = document.getElementById('output-body');
+    const riskBadge = document.getElementById('output-risk-badge');
+
+    // Validation: Require at least one symptom OR non-normal fever OR measured body temp
+    if (selectedSymptoms.length === 0 && fever === 'normal' && animalBodyTemp === null) {
+      if (outputBody) {
+        outputBody.innerHTML = `
+          <div class="p-6 text-center border border-amber-500/30 bg-amber-500/10 rounded-xl space-y-2 text-amber-400">
+            <span class="text-3xl">⚠️</span>
+            <h4 class="font-semibold text-white">Please Select Observed Symptoms or Enter Measured Body Temperature</h4>
+            <p class="text-xs">Check at least one symptom box (e.g. Skin Nodules, Mouth Blisters) or select fever level to evaluate risk.</p>
+          </div>
+        `;
+      }
+      if (riskBadge) {
+        riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-warning';
+        riskBadge.textContent = 'Input Required';
+      }
+      return;
+    }
+
+    // Prevent accidental duplicate submissions and show loading state
+    if (btnSubmit) {
+      btnSubmit.disabled = true;
+      btnSubmit.classList.add('opacity-75', 'cursor-not-allowed');
+      btnSubmit.innerHTML = `
+        <span class="inline-block animate-spin mr-2">⚙️</span>
+        <span>Evaluating Livestock Health Risk...</span>
+      `;
+    }
+
     if (outputBody) {
       outputBody.innerHTML = `
-        <div class="p-6 text-center border border-amber-500/30 bg-amber-500/10 rounded-xl space-y-2 text-amber-400">
-          <span class="text-3xl">⚠️</span>
-          <h4 class="font-semibold text-white">Please Select Observed Symptoms or Enter Measured Body Temperature</h4>
-          <p class="text-xs">Select symptom boxes or enter thermometer temperature to run PashuRaksha AI evaluation.</p>
+        <div class="p-8 text-center space-y-3">
+          <div class="inline-block animate-spin text-3xl">⚙️</div>
+          <p class="text-sm text-emerald-400 font-semibold">Evaluating health report with PashuRaksha AI Neural Diagnostics...</p>
+          <p class="text-xs text-slate-400">Matching symptoms and cross-referencing environmental surveillance context...</p>
         </div>
       `;
     }
     if (riskBadge) {
-      riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-warning';
-      riskBadge.textContent = 'Input Required';
+      riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 animate-pulse';
+      riskBadge.textContent = 'Analyzing...';
     }
-    return;
-  }
 
-  if (outputBody) {
-    outputBody.innerHTML = `
-      <div class="p-8 text-center space-y-3">
-        <div class="inline-block animate-spin text-3xl">⚙️</div>
-        <p class="text-xs text-emerald-400">Evaluating health report with PashuRaksha AI Neural Diagnostics...</p>
-      </div>
-    `;
-  }
+    const payload: DiagnosisPayload = {
+      cattle_type: cattleType,
+      fever_status: fever,
+      symptoms: selectedSymptoms,
+      latitude: state.location.latitude,
+      longitude: state.location.longitude,
+      district: districtInput || null,
+      village: villageInput || null,
+      animal_body_temperature: animalBodyTemp,
+      environmental_temperature: state.weather.temperature,
+      relative_humidity: state.weather.humidity,
+      rainfall: state.weather.rainfall,
+      wind_speed: state.weather.windSpeed,
+      weather_condition: state.weather.condition,
+      weather_source: state.weather.source
+    };
 
-  const payload: DiagnosisPayload = {
-    cattle_type: cattleType,
-    fever_status: fever,
-    symptoms: selectedSymptoms,
-    latitude: state.location.latitude,
-    longitude: state.location.longitude,
-    district: districtInput,
-    village: villageInput,
-    animal_body_temperature: animalBodyTemp,
-    environmental_temperature: state.weather.temperature,
-    relative_humidity: state.weather.humidity,
-    rainfall: state.weather.rainfall,
-    wind_speed: state.weather.windSpeed,
-    weather_condition: state.weather.condition,
-    weather_source: state.weather.source
-  };
+    let diagnosisData: any = null;
 
-  if (isBackendAvailable) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/workflow/reports`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({...payload, farmer_id: "farmer_default"})
-      });
+    // Check backend health if not already connected
+    if (!isBackendAvailable) {
+      await checkBackendHealth();
+    }
 
-      if (response.ok) {
-        const report = await response.json();
-        renderDiagnosisResult(report.diagnosis);
-        return;
+    if (isBackendAvailable) {
+      try {
+        // Direct call to /api/diagnose
+        const res = await fetchWithTimeout(`${API_BASE_URL}/api/diagnose`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }, 4000);
+
+        if (res.ok) {
+          diagnosisData = await res.json();
+
+          // Also record to workflow reports in background
+          fetchWithTimeout(`${API_BASE_URL}/api/workflow/reports`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, farmer_id: "farmer_default" })
+          }, 3000).catch(e => console.warn("Workflow record error:", e));
+        }
+      } catch (err) {
+        console.warn("Backend API request failed, falling back to client-side engine.", err);
       }
-    } catch (err) {
-      console.warn("Backend API request failed, saving to offline queue & running standalone engine.", err);
+    }
+
+    if (diagnosisData) {
+      renderDiagnosisResult(diagnosisData);
+      return;
+    }
+
+    // Save to Offline Queue in localStorage
+    saveToOfflineQueue(payload);
+    renderClientDiagnosisResult(payload);
+
+  } catch (err) {
+    console.error("Critical error in submitDiagnosis:", err);
+    const outputBody = document.getElementById('output-body');
+    const riskBadge = document.getElementById('output-risk-badge');
+    if (outputBody) {
+      outputBody.innerHTML = `
+        <div class="p-6 bg-red-950/40 border border-red-500/30 rounded-xl space-y-2 text-red-400">
+          <strong class="text-sm font-bold block">❌ Evaluation Error</strong>
+          <p class="text-xs text-slate-300">An error occurred while evaluating health risk: ${String(err)}</p>
+          <button onclick="submitDiagnosis()" class="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-semibold">Retry</button>
+        </div>
+      `;
+    }
+    if (riskBadge) {
+      riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-danger';
+      riskBadge.textContent = 'Error';
+    }
+  } finally {
+    if (btnSubmit) {
+      btnSubmit.disabled = false;
+      btnSubmit.classList.remove('opacity-75', 'cursor-not-allowed');
+      btnSubmit.innerHTML = originalBtnHTML;
     }
   }
-
-  // Save to Offline Queue in localStorage
-  saveToOfflineQueue(payload);
-  renderClientDiagnosisResult(payload);
 }
 
 function saveToOfflineQueue(payload: DiagnosisPayload): void {
@@ -503,12 +657,20 @@ function renderDiagnosisResult(data: any): void {
 
   if (!outputBody || !riskBadge) return;
 
-  if (data.overall_risk_level.includes("CRITICAL") || data.overall_risk_level.includes("EMERGENCY")) {
+  const riskLevel = data.overall_risk_level || 'LOW — 0/100';
+
+  if (riskLevel.includes("CRITICAL") || riskLevel.includes("EMERGENCY")) {
     riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-danger animate-pulse';
-    riskBadge.textContent = `🚨 ${data.overall_risk_level}`;
-  } else {
+    riskBadge.textContent = `🚨 ${riskLevel}`;
+  } else if (riskLevel.includes("HIGH")) {
+    riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-danger';
+    riskBadge.textContent = `⚠️ ${riskLevel}`;
+  } else if (riskLevel.includes("MODERATE")) {
     riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-warning';
-    riskBadge.textContent = `⚠️ ${data.overall_risk_level}`;
+    riskBadge.textContent = `⚠️ ${riskLevel}`;
+  } else {
+    riskBadge.className = 'px-3 py-1 rounded-full text-xs font-bold badge-success';
+    riskBadge.textContent = `✓ ${riskLevel}`;
   }
 
   // Environmental signals section (STRICTLY SEPARATE FROM ANIMAL SYMPTOMS)
@@ -517,7 +679,7 @@ function renderDiagnosisResult(data: any): void {
     envSignalsHTML = `
       <div class="p-3 bg-blue-950/40 border border-blue-500/30 rounded-xl space-y-1.5 text-xs text-blue-300">
         <strong class="text-blue-400 font-bold block flex items-center gap-1.5">
-          🌦 Environmental signals used by the risk engine:
+          🌦 Environmental Surveillance Signals Influencing Risk:
         </strong>
         <ul class="list-disc list-inside space-y-1 text-slate-300">
           ${data.environmental_signals_used.map((sig: string) => `<li>${sig}</li>`).join('')}
@@ -529,53 +691,72 @@ function renderDiagnosisResult(data: any): void {
   // Animal Body Temperature summary badge
   let animalTempHTML = '';
   if (data.animal_body_temperature !== null && data.animal_body_temperature !== undefined) {
-    animalTempHTML = `<span class="bg-amber-900/40 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-mono">Thermometer Body Temp: ${data.animal_body_temperature} °C</span>`;
+    animalTempHTML = `<span class="bg-amber-900/40 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-mono">Measured Animal Temp: ${data.animal_body_temperature} °C</span>`;
   }
 
-  let candidatesHTML = data.matched_candidates.map((c: any, idx: number) => `
-    <div class="p-4 rounded-xl border ${idx === 0 ? 'border-emerald-500/50 bg-emerald-950/20' : 'border-slate-700 bg-slate-900/60'} space-y-2">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-bold ${idx === 0 ? 'text-emerald-400' : 'text-slate-400'}">Candidate #${idx + 1}:</span>
-          <span class="font-bold text-sm text-white">${c.name}</span>
+  let candidatesHTML = '';
+  if (data.matched_candidates && data.matched_candidates.length > 0) {
+    candidatesHTML = data.matched_candidates.map((c: any, idx: number) => `
+      <div class="p-4 rounded-xl border ${idx === 0 ? 'border-emerald-500/50 bg-emerald-950/20' : 'border-slate-700 bg-slate-900/60'} space-y-2">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold ${idx === 0 ? 'text-emerald-400' : 'text-slate-400'}">Suspected Signal #${idx + 1}:</span>
+            <span class="font-bold text-sm text-white">${c.name}</span>
+          </div>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">Confidence: ${Math.round(c.confidence_score)}/100</span>
         </div>
-        <span class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">Risk Indication: ${Math.round(c.confidence_score)}/100</span>
+        <p class="text-xs text-slate-400"><strong>Pathogen / Vector:</strong> ${c.pathogen}</p>
+        <div class="mt-2 space-y-1">
+          <strong class="text-xs text-emerald-400 block">🛡️ Recommended Next Steps & Prevention:</strong>
+          <ul class="list-disc list-inside text-xs text-slate-200 space-y-1">
+            ${c.precautions.map((p: string) => `<li>${p}</li>`).join('')}
+          </ul>
+        </div>
+        <div class="pt-2 text-xs text-amber-300">
+          <strong>🌿 Ethno-Veterinary Remedy:</strong> ${c.evm_remedy}
+        </div>
       </div>
-      <p class="text-xs text-slate-400"><strong>Possible Risk Signal:</strong> ${c.pathogen}</p>
-      <div class="mt-2 space-y-1">
-        <strong class="text-xs text-emerald-400 block">🛡️ PashuRaksha Prevention Guidance:</strong>
-        <ul class="list-disc list-inside text-xs text-slate-200 space-y-1">
-          ${c.precautions.map((p: string) => `<li>${p}</li>`).join('')}
-        </ul>
+    `).join('');
+  } else {
+    candidatesHTML = `
+      <div class="p-4 rounded-xl border border-slate-700 bg-slate-900/60 space-y-2">
+        <h4 class="font-bold text-sm text-emerald-400">Low Specific Epizootic Risk</h4>
+        <p class="text-xs text-slate-300">The reported indicators do not exhibit high confidence for major surveyed epizootics (LSD, FMD, HS, BQ, Mastitis).</p>
+        <div class="text-xs text-slate-400">
+          <strong>Recommended Action:</strong> Provide clean drinking water, protect from heat/stress, isolate if fever increases, and consult local veterinary personnel if condition persists.
+        </div>
       </div>
-      <div class="pt-2 text-xs text-amber-300">
-        <strong>🌿 Ethno-Veterinary Remedy:</strong> ${c.evm_remedy}
-      </div>
-    </div>
-  `).join('');
+    `;
+  }
 
-  let containmentHTML = `
-    <div class="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs space-y-2 text-amber-300">
-      <strong class="block font-bold">📢 Emergency Containment Protocol:</strong>
-      <ol class="list-decimal list-inside space-y-1">
-        ${data.containment_protocol.map((step: string) => `<li>${step}</li>`).join('')}
-      </ol>
-    </div>
-  `;
+  let containmentHTML = '';
+  if (data.containment_protocol && data.containment_protocol.length > 0) {
+    containmentHTML = `
+      <div class="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs space-y-2 text-amber-300">
+        <strong class="block font-bold">📢 Containment & Bio-Security Protocol:</strong>
+        <ol class="list-decimal list-inside space-y-1">
+          ${data.containment_protocol.map((step: string) => `<li>${step}</li>`).join('')}
+        </ol>
+      </div>
+    `;
+  }
+
+  const districtDisplay = data.location?.district || state.location.district || 'Not detected (Optional)';
+  const villageDisplay = data.location?.village || state.location.village || 'Locality';
 
   outputBody.innerHTML = `
     <div class="space-y-4">
       <div class="p-3 bg-slate-900 rounded-lg text-xs flex flex-wrap justify-between items-center gap-2 text-slate-300">
         <span>Cattle: <strong class="capitalize text-white">${data.cattle_type}</strong> | Fever: <strong class="capitalize text-white">${data.fever_status}</strong></span>
         ${animalTempHTML}
-        <span>Location: <strong class="text-emerald-400">${data.location?.district || state.location.district || 'Detected'}, ${data.location?.village || state.location.village || 'Locality'}</strong></span>
+        <span>Location: <strong class="text-emerald-400">${districtDisplay}, ${villageDisplay}</strong></span>
       </div>
       ${envSignalsHTML}
       ${candidatesHTML}
       ${containmentHTML}
       <div class="mt-4 pt-4 border-t border-slate-700 text-xs text-slate-400 text-center">
         Prototype risk indication based on available health, environmental and surveillance signals.
-        <br><strong>Risk indication is not a diagnosis. Veterinary verification is recommended.</strong>
+        <br><strong class="text-amber-400">⚠️ Risk indication is not a clinical diagnosis. Veterinary examination and laboratory confirmation remain authoritative.</strong>
       </div>
     </div>
   `;
@@ -615,6 +796,9 @@ function renderClientDiagnosisResult(payload: DiagnosisPayload): void {
           <div class="pt-2 text-xs text-emerald-400">
             <strong>Recommended Action:</strong> Offer clean drinking water with electrolytes; keep animal in shaded, ventilated pen.
           </div>
+          <div class="mt-4 pt-4 border-t border-slate-700 text-xs text-slate-400 text-center">
+            <strong>⚠️ Risk indication is not a clinical diagnosis. Veterinary verification is recommended.</strong>
+          </div>
         </div>
       `;
     }
@@ -628,11 +812,6 @@ function renderClientDiagnosisResult(payload: DiagnosisPayload): void {
   else if (maxScore >= 60) overallRisk = `HIGH — ${Math.round(maxScore)}/100`;
   else if (maxScore >= 30) overallRisk = `MODERATE — ${Math.round(maxScore)}/100`;
 
-  if (riskBadge) {
-    riskBadge.className = maxScore >= 80 ? 'px-3 py-1 rounded-full text-xs font-bold badge-danger animate-pulse' : 'px-3 py-1 rounded-full text-xs font-bold badge-warning';
-    riskBadge.textContent = `🚨 ${overallRisk}`;
-  }
-
   renderDiagnosisResult({
     cattle_type: payload.cattle_type,
     fever_status: payload.fever_status,
@@ -641,7 +820,7 @@ function renderClientDiagnosisResult(payload: DiagnosisPayload): void {
     environmental_signals_used: envSignals,
     animal_body_temperature: payload.animal_body_temperature,
     location: {
-      district: payload.district || state.location.district || 'Local Area',
+      district: payload.district || state.location.district || 'Not detected (Optional)',
       village: payload.village || state.location.village || 'Locality'
     },
     containment_protocol: [
@@ -1144,22 +1323,37 @@ export async function retrySync(index: number) {
   }
 }
 
-// Initialize on window load
-window.addEventListener('DOMContentLoaded', async () => {
-  // Expose global functions for inline HTML onclick handlers
-  (window as any).switchTab = switchTab;
-  (window as any).presetCase = presetCase;
-  (window as any).submitDiagnosis = submitDiagnosis;
-  (window as any).fetchDiseases = fetchDiseases;
-  (window as any).requestAutomaticLocation = requestAutomaticLocation;
-  (window as any).fetchVetReports = fetchVetReports;
-  (window as any).fetchLabReports = fetchLabReports;
-  (window as any).fetchGISReports = fetchGISReports;
-  (window as any).renderOfflineQueue = renderOfflineQueue;
-  (window as any).retrySync = retrySync;
-  (window as any).changeLanguage = changeLanguage;
-  (window as any).updateReportStatus = updateReportStatus;
+// Expose global functions immediately so inline HTML onclick handlers ALWAYS work
+(window as any).switchTab = switchTab;
+(window as any).presetCase = presetCase;
+(window as any).submitDiagnosis = submitDiagnosis;
+(window as any).fetchDiseases = fetchDiseases;
+(window as any).requestAutomaticLocation = requestAutomaticLocation;
+(window as any).fetchVetReports = fetchVetReports;
+(window as any).fetchLabReports = fetchLabReports;
+(window as any).fetchGISReports = fetchGISReports;
+(window as any).renderOfflineQueue = renderOfflineQueue;
+(window as any).retrySync = retrySync;
+(window as any).changeLanguage = changeLanguage;
+(window as any).updateReportStatus = updateReportStatus;
 
-  await checkBackendHealth();
-  requestAutomaticLocation();
-});
+export async function initApp(): Promise<void> {
+  console.log('[PashuRaksha AI] Initializing dashboard...');
+  try {
+    await checkBackendHealth();
+  } catch (e) {
+    console.warn('[PashuRaksha AI] Backend check failed:', e);
+  }
+  try {
+    requestAutomaticLocation();
+  } catch (e) {
+    console.warn('[PashuRaksha AI] Location detection failed:', e);
+  }
+}
+
+// Guarantee initApp runs whether DOMContentLoaded has already fired or not
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { initApp(); });
+} else {
+  initApp();
+}

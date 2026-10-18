@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "bundle": "esbuild app.ts --outfile=app.js --target=es2020 --format=iife",
+    "build": "esbuild app.ts --outfile=app.js --target=es2020 --format=iife && vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit"
   },
